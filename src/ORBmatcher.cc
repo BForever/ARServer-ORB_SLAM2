@@ -27,7 +27,7 @@
 
 #include "Thirdparty/DBoW2/DBoW2/FeatureVector.h"
 
-#include<stdint.h>
+#include<stdint-gcc.h>
 
 using namespace std;
 
@@ -42,34 +42,45 @@ ORBmatcher::ORBmatcher(float nnratio, bool checkOri): mfNNratio(nnratio), mbChec
 {
 }
 
+//跟踪局部地图用，有其他重载，***zh
 int ORBmatcher::SearchByProjection(Frame &F, const vector<MapPoint*> &vpMapPoints, const float th)
 {
     int nmatches=0;
 
     const bool bFactor = th!=1.0;
 
+    // cout << "ORBmatcher::SearchByProjection : vpMapPoints.size() = " << vpMapPoints.size() << endl;
     for(size_t iMP=0; iMP<vpMapPoints.size(); iMP++)
     {
         MapPoint* pMP = vpMapPoints[iMP];
-        if(!pMP->mbTrackInView)
+        if(!pMP->mbTrackInView){
+            // cout << "ORBmatcher::SearchByProjection : pMP->mbTrackInView is false, continue;" << endl;
             continue;
+        }
 
-        if(pMP->isBad())
+        if(pMP->isBad()){
+            // cout << "ORBmatcher::SearchByProjection : pMP->isBad();" << endl;
             continue;
+        }
 
         const int &nPredictedLevel = pMP->mnTrackScaleLevel;
 
         // The size of the window will depend on the viewing direction
+        // cout << "ORBmatcher::SearchByProjection : The size of the window will depend on the viewing direction " << endl;
         float r = RadiusByViewingCos(pMP->mTrackViewCos);
+        // cout << "ORBmatcher::SearchByProjection : RadiusByViewingCos finished " << endl;
 
         if(bFactor)
             r*=th;
 
         const vector<size_t> vIndices =
                 F.GetFeaturesInArea(pMP->mTrackProjX,pMP->mTrackProjY,r*F.mvScaleFactors[nPredictedLevel],nPredictedLevel-1,nPredictedLevel);
+        // cout << "ORBmatcher::SearchByProjection : GetFeaturesInArea finished " << endl;
 
-        if(vIndices.empty())
+        if(vIndices.empty()){
+            // cout << "ORBmatcher::SearchByProjection : vIndices is empty. " << endl;
             continue;
+        }
 
         const cv::Mat MPdescriptor = pMP->GetDescriptor();
 
@@ -156,6 +167,194 @@ bool ORBmatcher::CheckDistEpipolarLine(const cv::KeyPoint &kp1,const cv::KeyPoin
     return dsqr<3.84*pKF2->mvLevelSigma2[kp2.octave];
 }
 
+
+//***zh
+int ORBmatcher::SearchByBoW(KeyFrame* pKF,Frame &F, vector<MapPoint*> &vpMapPointMatches, vector<int> &vpObjectMpMatches)
+{
+    string tag = "OrbMatcher::SearchbyBow";
+    const vector<MapPoint*> vpMapPointsKF = pKF->GetMapPointMatches();
+
+    //cout << tag << "KF HAS " << vpMapPointsKF.size() << " mappoints."<< endl;//的确是１０００多的那个,是和keypoint相对应的.
+
+
+    vpMapPointMatches = vector<MapPoint*>(F.N,static_cast<MapPoint*>(NULL));
+
+
+    //***by zh
+    vpObjectMpMatches = vector<int>(pKF->mpMap->getObjNums(), 0); //当前mp里面obj的数量。
+    //cout << tag << " create vpObjectMpMatches " << endl;
+
+    int cnt = 0;
+    for (auto mp:pKF->GetMapPointMatches()){
+
+      if(!mp){
+        //cout << "mappoint " << cnt << " doesn't exist " << endl;
+        continue;
+      }
+
+      if(mp->isBad()){
+        //cout << "mappoint " << cnt << " bad point " << endl;
+        continue;
+      }
+
+
+      //验证，是否存在地图点空label,
+      //cout << "mappoint " << cnt << " has a label " << mp->label << endl;
+      //cnt ++;
+
+      if (mp->label == ""){
+        //cout << "unlabeled mappoint" << endl;
+        //getchar();
+        //getchar();
+      }
+
+      for( int i=0; i < pKF->mpMap->getObjNums(); i++ ){
+        if (pKF->mpMap->AllObjs[i]->objname == mp->label){
+        vpObjectMpMatches[i] += 1;//记录当前帧里所有地图点，分属不同obj的数量
+      }
+    }
+  }
+//cout << tag << "finish vpObjectMpMatches " << endl;
+    //
+
+    const DBoW2::FeatureVector &vFeatVecKF = pKF->mFeatVec;
+
+    int nmatches=0;
+
+    vector<int> rotHist[HISTO_LENGTH];
+    for(int i=0;i<HISTO_LENGTH;i++)
+        rotHist[i].reserve(500);
+    const float factor = 1.0f/HISTO_LENGTH;
+
+    // We perform the matching over ORB that belong to the same vocabulary node (at a certain level)
+    DBoW2::FeatureVector::const_iterator KFit = vFeatVecKF.begin();
+    DBoW2::FeatureVector::const_iterator Fit = F.mFeatVec.begin();
+    DBoW2::FeatureVector::const_iterator KFend = vFeatVecKF.end();
+    DBoW2::FeatureVector::const_iterator Fend = F.mFeatVec.end();
+
+    while(KFit != KFend && Fit != Fend)
+    {
+        if(KFit->first == Fit->first)
+        {
+            const vector<unsigned int> vIndicesKF = KFit->second;
+            const vector<unsigned int> vIndicesF = Fit->second;
+
+            for(size_t iKF=0; iKF<vIndicesKF.size(); iKF++)
+            {
+                const unsigned int realIdxKF = vIndicesKF[iKF];
+
+                MapPoint* pMP = vpMapPointsKF[realIdxKF];
+
+                if(!pMP)
+                    continue;
+
+                if(pMP->isBad())
+                    continue;
+
+                const cv::Mat &dKF= pKF->mDescriptors.row(realIdxKF);
+
+                int bestDist1=256;
+                int bestIdxF =-1 ;
+                int bestDist2=256;
+
+                for(size_t iF=0; iF<vIndicesF.size(); iF++)
+                {
+                    const unsigned int realIdxF = vIndicesF[iF];
+
+                    if(vpMapPointMatches[realIdxF])
+                        continue;
+
+                    const cv::Mat &dF = F.mDescriptors.row(realIdxF);
+
+                    const int dist =  DescriptorDistance(dKF,dF);
+
+                    if(dist<bestDist1)
+                    {
+                        bestDist2=bestDist1;
+                        bestDist1=dist;
+                        bestIdxF=realIdxF;
+                    }
+                    else if(dist<bestDist2)
+                    {
+                        bestDist2=dist;
+                    }
+                }
+
+                if(bestDist1<=TH_LOW)
+                {
+                    if(static_cast<float>(bestDist1)<mfNNratio*static_cast<float>(bestDist2))
+                    {
+                        vpMapPointMatches[bestIdxF]=pMP;
+
+                        /*
+                        if(F.matId == 352){
+                          if (pMP->label == "laptop2"){
+                            float xx = F.mvKeys[bestIdxF].pt.x;
+                            float yy = F.mvKeys[bestIdxF].pt.y;
+                            cout << "coordinate x is " << xx << " and y is " << yy <<endl;
+                            getchar();
+                            getchar();
+                          }
+                        }*/
+
+                        const cv::KeyPoint &kp = pKF->mvKeysUn[realIdxKF];
+
+                        if(!mbCheckOrientation)//!***byzh
+                        {
+                            float rot = kp.angle-F.mvKeys[bestIdxF].angle;
+                            if(rot<0.0)
+                                rot+=360.0f;
+                            int bin = round(rot*factor);
+                            if(bin==HISTO_LENGTH)
+                                bin=0;
+                            assert(bin>=0 && bin<HISTO_LENGTH);
+                            rotHist[bin].push_back(bestIdxF);
+                        }
+                        nmatches++;
+                    }
+                }
+
+            }
+
+            KFit++;
+            Fit++;
+        }
+        else if(KFit->first < Fit->first)
+        {
+            KFit = vFeatVecKF.lower_bound(Fit->first);
+        }
+        else
+        {
+            Fit = F.mFeatVec.lower_bound(KFit->first);
+        }
+    }
+
+
+    if(!mbCheckOrientation)//!***byzh
+    {
+        int ind1=-1;
+        int ind2=-1;
+        int ind3=-1;
+
+        ComputeThreeMaxima(rotHist,HISTO_LENGTH,ind1,ind2,ind3);
+
+        for(int i=0; i<HISTO_LENGTH; i++)
+        {
+            if(i==ind1 || i==ind2 || i==ind3)
+                continue;
+            for(size_t j=0, jend=rotHist[i].size(); j<jend; j++)
+            {
+                vpMapPointMatches[rotHist[i][j]]=static_cast<MapPoint*>(NULL);
+                nmatches--;
+            }
+        }
+    }
+    return nmatches;
+}
+
+
+
+
 int ORBmatcher::SearchByBoW(KeyFrame* pKF,Frame &F, vector<MapPoint*> &vpMapPointMatches)
 {
     const vector<MapPoint*> vpMapPointsKF = pKF->GetMapPointMatches();
@@ -194,7 +393,7 @@ int ORBmatcher::SearchByBoW(KeyFrame* pKF,Frame &F, vector<MapPoint*> &vpMapPoin
                     continue;
 
                 if(pMP->isBad())
-                    continue;                
+                    continue;
 
                 const cv::Mat &dKF= pKF->mDescriptors.row(realIdxKF);
 
@@ -287,6 +486,7 @@ int ORBmatcher::SearchByBoW(KeyFrame* pKF,Frame &F, vector<MapPoint*> &vpMapPoin
     return nmatches;
 }
 
+//在当前关键帧中匹配所有关键帧中的地图点，需要计算sim3，用于Loop Closing。***zh
 int ORBmatcher::SearchByProjection(KeyFrame* pKF, cv::Mat Scw, const vector<MapPoint*> &vpPoints, vector<MapPoint*> &vpMatched, int th)
 {
     // Get Calibration Parameters for later projection
@@ -475,6 +675,7 @@ int ORBmatcher::SearchForInitialization(Frame &F1, Frame &F2, vector<cv::Point2f
                     float rot = F1.mvKeysUn[i1].angle-F2.mvKeysUn[bestIdx2].angle;
                     if(rot<0.0)
                         rot+=360.0f;
+                    //int bin = round(rot*factor); //***zh
                     int bin = round(rot/(360*factor));
                     if(bin==HISTO_LENGTH)
                         bin=0;
@@ -656,7 +857,7 @@ int ORBmatcher::SearchByBoW(KeyFrame *pKF1, KeyFrame *pKF2, vector<MapPoint *> &
 
 int ORBmatcher::SearchForTriangulation(KeyFrame *pKF1, KeyFrame *pKF2, cv::Mat F12,
                                        vector<pair<size_t, size_t> > &vMatchedPairs, const bool bOnlyStereo)
-{    
+{
     const DBoW2::FeatureVector &vFeatVec1 = pKF1->mFeatVec;
     const DBoW2::FeatureVector &vFeatVec2 = pKF2->mFeatVec;
 
@@ -695,9 +896,9 @@ int ORBmatcher::SearchForTriangulation(KeyFrame *pKF1, KeyFrame *pKF2, cv::Mat F
             for(size_t i1=0, iend1=f1it->second.size(); i1<iend1; i1++)
             {
                 const size_t idx1 = f1it->second[i1];
-                
+
                 MapPoint* pMP1 = pKF1->GetMapPoint(idx1);
-                
+
                 // If there is already a MapPoint skip
                 if(pMP1)
                     continue;
@@ -707,20 +908,20 @@ int ORBmatcher::SearchForTriangulation(KeyFrame *pKF1, KeyFrame *pKF2, cv::Mat F
                 if(bOnlyStereo)
                     if(!bStereo1)
                         continue;
-                
+
                 const cv::KeyPoint &kp1 = pKF1->mvKeysUn[idx1];
-                
+
                 const cv::Mat &d1 = pKF1->mDescriptors.row(idx1);
-                
+
                 int bestDist = TH_LOW;
                 int bestIdx2 = -1;
-                
+
                 for(size_t i2=0, iend2=f2it->second.size(); i2<iend2; i2++)
                 {
                     size_t idx2 = f2it->second[i2];
-                    
+
                     MapPoint* pMP2 = pKF2->GetMapPoint(idx2);
-                    
+
                     // If we have already matched or there is a MapPoint skip
                     if(vbMatched2[idx2] || pMP2)
                         continue;
@@ -730,11 +931,11 @@ int ORBmatcher::SearchForTriangulation(KeyFrame *pKF1, KeyFrame *pKF2, cv::Mat F
                     if(bOnlyStereo)
                         if(!bStereo2)
                             continue;
-                    
+
                     const cv::Mat &d2 = pKF2->mDescriptors.row(idx2);
-                    
+
                     const int dist = DescriptorDistance(d1,d2);
-                    
+
                     if(dist>TH_LOW || dist>bestDist)
                         continue;
 
@@ -754,7 +955,7 @@ int ORBmatcher::SearchForTriangulation(KeyFrame *pKF1, KeyFrame *pKF2, cv::Mat F
                         bestDist = dist;
                     }
                 }
-                
+
                 if(bestIdx2>=0)
                 {
                     const cv::KeyPoint &kp2 = pKF2->mvKeysUn[bestIdx2];
@@ -890,12 +1091,10 @@ int ORBmatcher::Fuse(KeyFrame *pKF, const vector<MapPoint *> &vpMapPoints, const
         const float radius = th*pKF->mvScaleFactors[nPredictedLevel];
 
         const vector<size_t> vIndices = pKF->GetFeaturesInArea(u,v,radius);
-
         if(vIndices.empty())
             continue;
 
         // Match to the most similar keypoint in the radius
-
         const cv::Mat dMP = pMP->GetDescriptor();
 
         int bestDist = 256;
@@ -1325,12 +1524,13 @@ int ORBmatcher::SearchBySim3(KeyFrame *pKF1, KeyFrame *pKF2, vector<MapPoint*> &
     return nFound;
 }
 
+//匹配上一帧的地图点，即前后两帧匹配，用于TrackWithMotionModel。***zh
 int ORBmatcher::SearchByProjection(Frame &CurrentFrame, const Frame &LastFrame, const float th, const bool bMono)
 {
-    int nmatches = 0;
+    int nmatches = 0; // For debug use
 
     // Rotation Histogram (to check rotation consistency)
-    vector<int> rotHist[HISTO_LENGTH];
+    vector<int> rotHist[HISTO_LENGTH]; // const int ORBmatcher::HISTO_LENGTH = 30;
     for(int i=0;i<HISTO_LENGTH;i++)
         rotHist[i].reserve(500);
     const float factor = 1.0f/HISTO_LENGTH;
@@ -1348,6 +1548,12 @@ int ORBmatcher::SearchByProjection(Frame &CurrentFrame, const Frame &LastFrame, 
     const bool bForward = tlc.at<float>(2)>CurrentFrame.mb && !bMono;
     const bool bBackward = -tlc.at<float>(2)>CurrentFrame.mb && !bMono;
 
+//    cout << "ORBmatcher::SearchByProjection() : There are " << LastFrame.N << " keypoints in the last frame, and ";
+    int nInlier=0; // For debug use
+    int nNegativeDepth=0; // For debug use
+    int nOutOfSeen=0; // For debug use
+    CurrentFrame.ClearBadDescriptor(); // For debug use
+    CurrentFrame.ClearGoodDescriptor(); // For debug use
     for(int i=0; i<LastFrame.N; i++)
     {
         MapPoint* pMP = LastFrame.mvpMapPoints[i];
@@ -1356,6 +1562,7 @@ int ORBmatcher::SearchByProjection(Frame &CurrentFrame, const Frame &LastFrame, 
         {
             if(!LastFrame.mvbOutlier[i])
             {
+                nInlier++; // For debug use
                 // Project
                 cv::Mat x3Dw = pMP->GetWorldPos();
                 cv::Mat x3Dc = Rcw*x3Dw+tcw;
@@ -1364,16 +1571,22 @@ int ORBmatcher::SearchByProjection(Frame &CurrentFrame, const Frame &LastFrame, 
                 const float yc = x3Dc.at<float>(1);
                 const float invzc = 1.0/x3Dc.at<float>(2);
 
-                if(invzc<0)
+                if(invzc<0){
+                    nNegativeDepth++; // For debug use
                     continue;
+                }
 
                 float u = CurrentFrame.fx*xc*invzc+CurrentFrame.cx;
                 float v = CurrentFrame.fy*yc*invzc+CurrentFrame.cy;
 
-                if(u<CurrentFrame.mnMinX || u>CurrentFrame.mnMaxX)
+                if(u<CurrentFrame.mnMinX || u>CurrentFrame.mnMaxX){
+                    nOutOfSeen++; // For debug use
                     continue;
-                if(v<CurrentFrame.mnMinY || v>CurrentFrame.mnMaxY)
+                }
+                if(v<CurrentFrame.mnMinY || v>CurrentFrame.mnMaxY){
+                    nOutOfSeen++; // For debug use
                     continue;
+                }
 
                 int nLastOctave = LastFrame.mvKeys[i].octave;
 
@@ -1423,10 +1636,11 @@ int ORBmatcher::SearchByProjection(Frame &CurrentFrame, const Frame &LastFrame, 
                     }
                 }
 
-                if(bestDist<=TH_HIGH)
+                if(bestDist<=TH_HIGH) // TH_HIGH = 100
                 {
-                    CurrentFrame.mvpMapPoints[bestIdx2]=pMP;
+                    CurrentFrame.mvpMapPoints[bestIdx2]=pMP;//把上一帧的mvpmappoints传递到了下一帧，但是似乎不能识别新的点啊
                     nmatches++;
+                    CurrentFrame.SaveGoodDescriptor(u,v,radius);
 
                     if(mbCheckOrientation)
                     {
@@ -1440,9 +1654,13 @@ int ORBmatcher::SearchByProjection(Frame &CurrentFrame, const Frame &LastFrame, 
                         rotHist[bin].push_back(bestIdx2);
                     }
                 }
+                else{ //For debug use, I'm trying to draw those points on the FrameDrawer that does not fit the DescriptorDistance requirement.
+                    CurrentFrame.SaveBadDescriptor(u,v,radius);
+                }
             }
         }
     }
+//    cout << nInlier << " of which are inliers, " << nNegativeDepth << " of which have negative depth; "<< nOutOfSeen++ << " of which are out of seen; " << nmatches << " of the seen points are pre-matches(<=TH_HIGH)." << endl; // For debug use
 
     //Apply rotation consistency
     if(mbCheckOrientation)
@@ -1465,6 +1683,7 @@ int ORBmatcher::SearchByProjection(Frame &CurrentFrame, const Frame &LastFrame, 
             }
         }
     }
+//    cout << "ORBmatcher::SearchByProjection() : After applying rotation consistency, " << nmatches << " matches left." << endl; // For debug use
 
     return nmatches;
 }

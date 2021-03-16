@@ -28,6 +28,7 @@
 #include "ORBextractor.h"
 #include "Frame.h"
 #include "KeyFrameDatabase.h"
+#include "InitKeyFrame.h"// For map loading
 
 #include <mutex>
 
@@ -39,11 +40,13 @@ class Map;
 class MapPoint;
 class Frame;
 class KeyFrameDatabase;
+class InitKeyFrame; // For map loading
 
 class KeyFrame
 {
 public:
     KeyFrame(Frame &F, Map* pMap, KeyFrameDatabase* pKFDB);
+    KeyFrame(InitKeyFrame &initkf, Map* pMap, KeyFrameDatabase* pKFDB,vector< MapPoint*>& vpMapPoints);
 
     // Pose functions
     void SetPose(const cv::Mat &Tcw);
@@ -120,6 +123,8 @@ public:
     // The following variables are accesed from only 1 thread or never change (no mutex needed).
 public:
 
+    int matId; //***zh
+
     static long unsigned int nNextId;
     long unsigned int mnId;
     const long unsigned int mnFrameId;
@@ -188,6 +193,8 @@ public:
     const int mnMaxY;
     const cv::Mat mK;
 
+    Map* mpMap; //***zh, from protected to public
+
 
     // The following variables need to be accessed trough a mutex to be thread safe.
 protected:
@@ -222,11 +229,11 @@ protected:
     // Bad flags
     bool mbNotErase;
     bool mbToBeErased;
-    bool mbBad;    
+    bool mbBad;
 
     float mHalfBaseline; // Only for visualization
 
-    Map* mpMap;
+
 
     std::mutex mMutexPose;
     std::mutex mMutexConnections;

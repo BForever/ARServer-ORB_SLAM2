@@ -29,6 +29,7 @@
 #include<opencv2/features2d/features2d.hpp>
 
 #include<mutex>
+#include<iostream>
 
 
 namespace ORB_SLAM2
@@ -48,6 +49,8 @@ public:
     // Draw last processed frame.
     cv::Mat DrawFrame();
 
+    bool mbSaveImage;
+
 protected:
 
     void DrawTextInfo(cv::Mat &im, int nState, cv::Mat &imText);
@@ -57,15 +60,31 @@ protected:
     int N;
     vector<cv::KeyPoint> mvCurrentKeys;
     vector<bool> mvbMap, mvbVO;
+    vector<int> mvbLabel;
+    vector<bool> mvbUselessPoint, mvbDiscardedPoint; // For debug use
     bool mbOnlyTracking;
     int mnTracked, mnTrackedVO;
+    int mnUselessPoint, mnDiscardedPoint;           // For debug use
     vector<cv::KeyPoint> mvIniKeys;
     vector<int> mvIniMatches;
     int mState;
 
+
+    int mvmatId;//***zzh
+    std::ofstream f;//**zzh
+    Frame mvframe; //***zh
+    int lastdraw_id = -1;
+    cv::Mat lastdraw_mat;
+
     Map* mpMap;
 
     std::mutex mMutex;
+
+    vector<cv::KeyPoint> mvBadDescriptor; //For debug use, I'm trying to draw those points on the FrameDrawer that does not fit the DescriptorDistance requirement.
+    vector<float> mvBadDescriptorRadius; //For debug use, I'm trying to draw those points on the FrameDrawer that does not fit the DescriptorDistance requirement.
+    vector<cv::KeyPoint> mvGoodDescriptor; //For debug use.
+    vector<float> mvGoodDescriptorRadius; //For debug use.
+
 };
 
 } //namespace ORB_SLAM

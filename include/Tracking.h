@@ -37,7 +37,6 @@
 #include "Initializer.h"
 #include "MapDrawer.h"
 #include "System.h"
-
 #include <mutex>
 
 namespace ORB_SLAM2
@@ -51,7 +50,7 @@ class LoopClosing;
 class System;
 
 class Tracking
-{  
+{
 
 public:
     Tracking(System* pSys, ORBVocabulary* pVoc, FrameDrawer* pFrameDrawer, MapDrawer* pMapDrawer, Map* pMap,
@@ -61,6 +60,7 @@ public:
     cv::Mat GrabImageStereo(const cv::Mat &imRectLeft,const cv::Mat &imRectRight, const double &timestamp);
     cv::Mat GrabImageRGBD(const cv::Mat &imRGB,const cv::Mat &imD, const double &timestamp);
     cv::Mat GrabImageMonocular(const cv::Mat &im, const double &timestamp);
+    cv::Mat GrabImageMonocular(const cv::Mat &im, const double &timestamp, int matID);
 
     void SetLocalMapper(LocalMapping* pLocalMapper);
     void SetLoopClosing(LoopClosing* pLoopClosing);
@@ -113,6 +113,10 @@ public:
     // True if local mapping is deactivated and we are performing only localization
     bool mbOnlyTracking;
 
+    // True if use the IMU Integrator
+    bool mbUseIMU;
+    float yaw_angle_accums;
+
     void Reset();
 
 protected:
@@ -126,6 +130,13 @@ protected:
     // Map initialization for monocular
     void MonocularInitialization();
     void CreateInitialMapMonocular();
+
+    // Map initialization for stereo and RGB-D when reloading a map.
+    void StereoInitializationWithMap();
+
+    // Map initialization for monocular when reloading a map.
+    void MonocularInitializationWithMap();
+
 
     void CheckReplacedInLastFrame();
     bool TrackReferenceKeyFrame();
@@ -143,6 +154,9 @@ protected:
 
     bool NeedNewKeyFrame();
     void CreateNewKeyFrame();
+
+    void Checkobjs();//***zh
+    void Checkseen();//***zh
 
     // In case of performing only localization, this flag is true when there are no matches to
     // points in the map. Still tracking will continue if there are enough matches with temporal points.
@@ -169,10 +183,10 @@ protected:
     KeyFrame* mpReferenceKF;
     std::vector<KeyFrame*> mvpLocalKeyFrames;
     std::vector<MapPoint*> mvpLocalMapPoints;
-    
+
     // System
     System* mpSystem;
-    
+
     //Drawers
     Viewer* mpViewer;
     FrameDrawer* mpFrameDrawer;

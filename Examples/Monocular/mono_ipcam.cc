@@ -28,9 +28,9 @@
 #include<opencv2/core/core.hpp>
 #include<opencv2/opencv.hpp>
 #include<System.h>
-#include "viewmatrix.pb.h"
-#include "viewmatrix.grpc.pb.h"
-#include "Transfer.h"
+#include "ARConnection.pb.h"
+#include "ARConnection.grpc.pb.h"
+#include "Examples/Monocular/proto/Transfer.h"
 #include <grpcpp/grpcpp.h>
 #include <mutex>
 
@@ -47,8 +47,8 @@ float F = 10;
 string server_address = "0.0.0.0:50051";
 
 int main(int argc, char **argv) {
-    if (argc < 4) {
-        cerr << endl << "Usage: ./mono_tum path_to_vocabulary path_to_settings url_of_the_ip_camera" << endl;
+    if (argc < 3) {
+        cerr << endl << "Usage: ./mono_tum path_to_vocabulary path_to_settings" << endl;
         return 1;
     }
     cv::FileStorage fsSettings(argv[2], cv::FileStorage::READ);
@@ -64,10 +64,11 @@ int main(int argc, char **argv) {
 
     // Create SLAM system. It initializes all system threads and gets ready to process frames.
     ORB_SLAM2::System SLAM(argv[1], argv[2], \
-    ORB_SLAM2::System::MONOCULAR, true);
-    ORB_SLAM2::Osmap osmap = ORB_SLAM2::Osmap(SLAM);
+    ORB_SLAM2::System::MONOCULAR, false);
 
-    Transfer service(&SLAM);
+    mutex bufferMutex;
+
+    Transfer service;
     grpc::ServerBuilder builder;
     builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
     builder.RegisterService(&service);
@@ -79,57 +80,10 @@ int main(int argc, char **argv) {
     });
 
     VideoCapture cap;
-    Mat frame;
-    mutex bufferMutex;
-    chrono::steady_clock::time_point receive_time_start;
-//    int receive_count = 0;
-    std::thread bufferthread([&]() {
-        int key = 0;
-        while (!finish) {
-            if (cap.open(string(argv[3]))) {
-                cout << "video stream reconnected!" << endl;
-//                cap.set(CV_CAP_PROP_FPS, 30);
-                cap.set(CV_CAP_PROP_BUFFERSIZE, 1);
-
-                while (true) {
-                    bool has_image = cap.grab();
-                    if (has_image){
-                        receive_time_start = chrono::steady_clock::now();
-                        cap.retrieve(frame);
-                        auto time_used = chrono::duration_cast<chrono::microseconds>(
-                            chrono::steady_clock::now() - receive_time_start);
-                        cout<<"decode one frame: "<<time_used.count()<<"."<<endl;
-                    }
-
-//                    receive_count += 1;
-//
-//                    if (time_used.count()>1) {
-//                        double frame_rate = receive_count / time_used.count();
-//                        cout << frame_rate << endl;
-//                        receive_time_start = chrono::steady_clock::now();
-//                        receive_count = 0;
-//                    }
-                    if (!has_image) {
-                        key++;
-                        if (key >= 25) {
-                            key = 0;
-                            break;
-                        } else {
-                            continue;
-                        }
-                    } else {
-                        key = 0;
-                    }
-                }
-            }
-            cout << "video stream disconnected! sleep 1s." << endl;
-            sleep(1);
-        }
-    });
 
     chrono::steady_clock::time_point track_time_start;
     int track_count = 0;
-    std::thread runthread([&]() {  // Start in new thread
+//    std::thread runthread([&]() {  // Start in new thread
         Mat C_Tcw;
 
         struct timespec tn;
@@ -140,10 +94,27 @@ int main(int argc, char **argv) {
         int inited = 0;
         track_time_start = chrono::steady_clock::now();
         while (!finish) {
+            if(service.reset){
+                SLAM.Reset();
+                service.reset= false;
+            }
             clock_gettime(CLOCK_REALTIME, &tn);
             tframe = double(tn.tv_sec) + double(tn.tv_nsec) / 1e9;
-            if (!frame.empty()) {
-                C_Tcw = SLAM.TrackMonocular(frame, tframe);
+            if (service.newFrame) {
+
+//                imshow("im",frame);
+                {
+                    unique_lock<mutex> lock(service.newFrameMutex);
+//                    service.updated = true;
+                    service.newFrame = false;
+                }
+                C_Tcw = SLAM.TrackMonocular(service.frame, tframe);
+                service.SetCameraPose(C_Tcw);
+                {
+                    unique_lock<mutex> lock(service.updatedMutex);
+                    service.updated = true;
+//                    service.newFrame = false;
+                }
                 track_count += 1;
                 auto time_used = chrono::duration_cast<chrono::duration<double>>(
                         chrono::steady_clock::now() - track_time_start);
@@ -153,25 +124,64 @@ int main(int argc, char **argv) {
                     track_time_start = chrono::steady_clock::now();
                     track_count = 0;
                 }
-                if (inited == 0&&argc>=6) {
-                    osmap.mapLoad(argv[5]);
-                    inited++;
-                }
             }
         }
-    });
+//    });
     // Start the visualization thread
-    SLAM.StartViewer();
+//    SLAM.StartViewer();
 
     finish = true;
     server->Shutdown();
 //    runthread.join();
-    bufferthread.join();
+//    bufferthread.join();
     serverthread.join();
     cout << "Tracking thread joined..." << endl;
     // Stop all threads
-    if(argc>=5)
-        osmap.mapSave(argv[4]);
     SLAM.Shutdown();
     return 0;
 }
+//    chrono::steady_clock::time_point receive_time_start;
+//    int receive_count = 0;
+//    std::thread bufferthread([&]() {
+//        int key = 0;
+//        while (!finish) {
+//            if (cap.open(string(argv[3]))) {
+//                cout << "video stream reconnected!" << endl;
+////                cap.set(CV_CAP_PROP_FPS, 30);
+//                cap.set(CV_CAP_PROP_BUFFERSIZE, 2);
+//
+//                while (true) {
+//                    bool has_image = cap.grab();
+//                    if (has_image){
+////                        receive_time_start = chrono::steady_clock::now();
+//                        cap.retrieve(frame);
+////                        auto time_used = chrono::duration_cast<chrono::microseconds>(
+////                            chrono::steady_clock::now() - receive_time_start);
+////                        cout<<"decode one frame: "<<time_used.count()<<"."<<endl;
+//                    }
+//
+////                    receive_count += 1;
+////
+////                    if (time_used.count()>1) {
+////                        double frame_rate = receive_count / time_used.count();
+////                        cout << frame_rate << endl;
+////                        receive_time_start = chrono::steady_clock::now();
+////                        receive_count = 0;
+////                    }
+//                    if (!has_image) {
+//                        key++;
+//                        if (key >= 25) {
+//                            key = 0;
+//                            break;
+//                        } else {
+//                            continue;
+//                        }
+//                    } else {
+//                        key = 0;
+//                    }
+//                }
+//            }
+//            cout << "video stream disconnected! sleep 1s." << endl;
+//            sleep(1);
+//        }
+//    });

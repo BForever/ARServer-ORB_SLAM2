@@ -1,42 +1,51 @@
 cmake_minimum_required(VERSION 2.8)
 project(ORB_SLAM2)
-# Temp for my mac
-#set(OpenCV_DIR /usr/local/opt/opencv@3/share/OpenCV)
+
 include(FindProtobuf)
+set(CMAKE_PREFIX_PATH "/home/fanhc/code/libtorch")
+find_package(Torch REQUIRED)
+find_package(TorchVision REQUIRED)
+include_directories("/home/fanhc/code/libtorch/include/torch/csrc/api/include/")
+include_directories("/home/fanhc/code/libtorch/include/")
+
 find_package(Protobuf REQUIRED)
 find_package(gRPC CONFIG REQUIRED)
 
 include_directories(
         ${PROTOBUF_INCLUDE_DIR}
 )
-
-#IF(NOT CMAKE_BUILD_TYPE)
+SET(CMAKE_BUILD_TYPE Debug)
+IF(NOT CMAKE_BUILD_TYPE)
   SET(CMAKE_BUILD_TYPE Release)
-#ENDIF()
+ENDIF()
 
 MESSAGE("Build type: " ${CMAKE_BUILD_TYPE})
 
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS}  -Wall  -O3 -march=native ")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall  -O3 -march=native ")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall   -O3 -march=native")
 
+set(CMAKE_CXX_STANDARD 14)
+add_definitions(-std=c++14)
 # Check C++11 or C++0x support
-include(CheckCXXCompilerFlag)
-CHECK_CXX_COMPILER_FLAG("-std=c++11" COMPILER_SUPPORTS_CXX11)
-CHECK_CXX_COMPILER_FLAG("-std=c++0x" COMPILER_SUPPORTS_CXX0X)
-if(COMPILER_SUPPORTS_CXX11)
-   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
-   add_definitions(-DCOMPILEDWITHC11)
-   message(STATUS "Using flag -std=c++11.")
-elseif(COMPILER_SUPPORTS_CXX0X)
-   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++0x")
-   add_definitions(-DCOMPILEDWITHC0X)
-   message(STATUS "Using flag -std=c++0x.")
-else()
-   message(FATAL_ERROR "The compiler ${CMAKE_CXX_COMPILER} has no C++11 support. Please use a different C++ compiler.")
-endif()
+#include(CheckCXXCompilerFlag)
+#CHECK_CXX_COMPILER_FLAG("-std=c++11" COMPILER_SUPPORTS_CXX11)
+#CHECK_CXX_COMPILER_FLAG("-std=c++0x" COMPILER_SUPPORTS_CXX0X)
+#if(COMPILER_SUPPORTS_CXX11)
+#   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
+#   add_definitions(-DCOMPILEDWITHC11)
+#   message(STATUS "Using flag -std=c++11.")
+#elseif(COMPILER_SUPPORTS_CXX0X)
+#   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++0x")
+#   add_definitions(-DCOMPILEDWITHC0X)
+#   message(STATUS "Using flag -std=c++0x.")
+#else()
+#   message(FATAL_ERROR "The compiler ${CMAKE_CXX_COMPILER} has no C++11 support. Please use a different C++ compiler.")
+#endif()
 
 LIST(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake_modules)
 
+#set(OpenCV_DIR "/home/zherlock/opencv-2.4.9/build/")
+#find_package(OpenCV 2.4.9 QUIET)
 find_package(OpenCV 3.0 QUIET)
 if(NOT OpenCV_FOUND)
    find_package(OpenCV 2.4.3 QUIET)
@@ -53,6 +62,7 @@ ${PROJECT_SOURCE_DIR}
 ${PROJECT_SOURCE_DIR}/include
 ${EIGEN3_INCLUDE_DIR}
 ${Pangolin_INCLUDE_DIRS}
+        Examples/Monocular/proto
 )
 
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/lib)
@@ -77,63 +87,65 @@ src/KeyFrameDatabase.cc
 src/Sim3Solver.cc
 src/Initializer.cc
 src/Viewer.cc
-        src/Osmap.cpp
-        src/osmap.pb.cc
-        src/Locater.cpp
-        src/Transfer.cpp
-        src/viewmatrix.grpc.pb.cc
-        src/viewmatrix.pb.cc
+src/InitKeyFrame.cc
+src/SystemSetting.cc
+src/Object.cc
+        src/InstanceDetect.cc
+        Examples/Monocular/proto/Transfer.cpp
+        Examples/Monocular/proto/ARConnection.grpc.pb.cc
+        Examples/Monocular/proto/ARConnection.pb.cc
 )
 # Temp for my mac
 target_link_libraries(${PROJECT_NAME}
-        gRPC::grpc++
         ${PROTOBUF_LIBRARIES}
 ${OpenCV_LIBS}
 ${EIGEN3_LIBS}
 ${Pangolin_LIBRARIES}
 ${PROJECT_SOURCE_DIR}/Thirdparty/DBoW2/lib/libDBoW2.so
 ${PROJECT_SOURCE_DIR}/Thirdparty/g2o/lib/libg2o.so
+       gRPC::grpc++
+        ${TORCH_LIBRARIES}
+        TorchVision::TorchVision
 )
 
 # Build examples
 
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/Examples/RGB-D)
-
-add_executable(rgbd_tum
-Examples/RGB-D/rgbd_tum.cc)
-target_link_libraries(rgbd_tum ${PROJECT_NAME})
-
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/Examples/Stereo)
-
-add_executable(stereo_kitti
-Examples/Stereo/stereo_kitti.cc)
-target_link_libraries(stereo_kitti ${PROJECT_NAME})
-
-add_executable(stereo_euroc
-Examples/Stereo/stereo_euroc.cc)
-target_link_libraries(stereo_euroc ${PROJECT_NAME})
+#set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/Examples/RGB-D)
+#
+#add_executable(rgbd_tum
+#Examples/RGB-D/rgbd_tum.cc)
+#target_link_libraries(rgbd_tum ${PROJECT_NAME})
+#
+#set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/Examples/Stereo)
+#
+#add_executable(stereo_kitti
+#Examples/Stereo/stereo_kitti.cc)
+#target_link_libraries(stereo_kitti ${PROJECT_NAME})
+#
+#add_executable(stereo_euroc
+#Examples/Stereo/stereo_euroc.cc)
+#target_link_libraries(stereo_euroc ${PROJECT_NAME})
 
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/Examples/Monocular)
 
-add_executable(mono_tum
-Examples/Monocular/mono_tum.cc)
-target_link_libraries(mono_tum ${PROJECT_NAME})
-
-add_executable(mono_kitti
-Examples/Monocular/mono_kitti.cc)
-target_link_libraries(mono_kitti ${PROJECT_NAME})
-
-add_executable(mono_euroc
-Examples/Monocular/mono_euroc.cc)
-target_link_libraries(mono_euroc ${PROJECT_NAME})
+#add_executable(mono_tum
+#Examples/Monocular/mono_tum.cc)
+#target_link_libraries(mono_tum ${PROJECT_NAME})
+#
+#add_executable(mono_kitti
+#Examples/Monocular/mono_kitti.cc)
+#target_link_libraries(mono_kitti ${PROJECT_NAME})
+#
+#add_executable(mono_euroc
+#Examples/Monocular/mono_euroc.cc)
+#target_link_libraries(mono_euroc ${PROJECT_NAME})
 
 add_executable(mono_ipcam
-        Examples/Monocular/mono_ipcam.cc)
-target_link_libraries(mono_ipcam ${PROJECT_NAME})
+        Examples/Monocular/mono_ipcam.cc
+       )
+target_link_libraries(mono_ipcam ${PROJECT_NAME} )
 
-# Build tools
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/tools)
-add_executable(bin_vocabulary
-        tools/bin_vocabulary.cc)
-target_link_libraries(bin_vocabulary ${PROJECT_NAME})
+add_definitions(-w)
+
+
